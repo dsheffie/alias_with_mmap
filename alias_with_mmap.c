@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -16,6 +17,7 @@
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
 #include <sys/ioctl.h>
+#include <sched.h>
 
 #ifndef O_TMPFILE
 #define O_TMPFILE (__O_TMPFILE | O_DIRECTORY)
@@ -24,7 +26,7 @@
 uint8_t buf[4096] = {0};
 
 #define NREGIONS 32
-#define BASE 0x1000000
+#define BASE 0x1000000UL
 
 int* ptrs[NREGIONS] = {NULL};
 
@@ -67,16 +69,24 @@ static uint64_t read_cycles(int fd) {
 int main(int argc, char *argv[]) {
   int *b = (int*)buf;
   int idx = 0, t= 0, iters = TRIES;  
-  int fd = open(".", O_RDWR|O_TMPFILE, 0600);
-  int cfd = cycle_counter();
+  int cfd,fd,pgsz;
+  pgsz = getpagesize();
+  
+  if(pgsz != 4096) {
+    printf("this micro assumes a 4k page and this machine is using %d byte pages\n", pgsz);
+    return -1;
+  }
+  
+  fd = open(".", O_RDWR|O_TMPFILE, 0600);
+  cfd = cycle_counter();
   
   for(int i = 0; i < 1024; i++) {
     b[i] = (i+1) & (1023);
   }
-  write(fd, buf, sizeof(buf));
+  assert(write(fd, buf, sizeof(buf)) == sizeof(buf));
 
   for(int i = 0; i < NREGIONS; i++) {
-    ptrs[i] = (int*)mmap(BASE+(4096*i), 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    ptrs[i] = (int*)mmap((void*)(BASE+(4096*i)), 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     assert(ptrs[i] != ((void*)-1L));
   }
   enable_counter(cfd);
